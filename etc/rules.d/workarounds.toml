@@ -1,0 +1,19 @@
+# Mirrors/frontends that exist specifically to view blocked sites through a
+# different domain, plus generic paywall/cache bypass tools. translate.goog
+# and web.archive.org are handled separately in code (dg_policy.rules
+# decodes the wrapped URL and re-classifies the real target -- see
+# classify_with_workarounds), so they are NOT listed here.
+rule = "S-workaround"
+domains = [
+  # Reddit frontends
+  "libreddit.spike.codes", "farside.link",
+  # Twitter/X frontends
+  "nitter.net",
+  # TikTok frontends
+  "proxitok.pussthecat.org",
+  # YouTube frontends (would otherwise bypass the YouTube-specific rules)
+  "invidious.io", "piped.video", "piped.kavin.rocks",
+  # Archive/cache/paywall bypass
+  "archive.ph", "archive.today", "archive.is", "archive.li", "archive.vn",
+  "cachedview.nl", "12ft.io", "1ft.io",
+]

@@ -1,0 +1,28 @@
+[Unit]
+Description=Distraction Guard watchdog (health checks, degrade/restore mode switching)
+After=distraction-guard.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/dg-watchdog
+Restart=always
+RestartSec=2
+
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+# RuntimeDirectory, not ReadWritePaths, for /run/distraction-guard: /run is
+# tmpfs, wiped every boot, and nothing else creates this directory.
+# ReadWritePaths requires the path to already exist -- without it, the
+# service failed at NAMESPACE setup on every single start (confirmed via a
+# real install: 90+ crash-loop restarts, status=226/NAMESPACE, "Failed to
+# set up mount namespacing: /run/distraction-guard: No such file or
+# directory"). RuntimeDirectory= creates it (0755 root:root) before
+# ExecStart runs and removes it on stop.
+RuntimeDirectory=distraction-guard
+ReadWritePaths=/var/lib/distraction-guard /var/log/distraction-guard /etc/NetworkManager/dnsmasq.d
+
+[Install]
+WantedBy=multi-user.target

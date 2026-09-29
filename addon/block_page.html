@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Blocked</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee; display: flex;
+         align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .card { text-align: center; max-width: 30rem; padding: 2rem; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+  p { color: #999; font-size: 0.95rem; line-height: 1.5; }
+  code { background: #222; padding: 0.15rem 0.4rem; border-radius: 0.25rem; color: #ccc; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>This page matched a blocked rule.</h1>
+    <p>Rule: <code>{{RULE_ID}}</code></p>
+    <p>Temporary access needs a friend code:<br>
+       <code>sudo guardctl allow-temp &lt;host&gt; &lt;minutes&gt;</code></p>
+  </div>
+</body>
+</html>

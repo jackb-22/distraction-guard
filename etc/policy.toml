@@ -1,0 +1,85 @@
+# Distraction Guard settings. Edited only via `guardctl set <key> <value>`
+# (a LOOSEN command once locked) -- never by hand once installed, so the
+# ratchet actually holds. This copy is the shadow-mode default.
+
+enforce = false
+degrade_after_seconds = 300
+lan_tcp_ports = []
+ssh_allow = ["github.com", "gitlab.com"]
+
+# Hosts that are never TLS-intercepted at all -- traffic passes straight
+# through, unclassified and unscanned. Keep this to things where
+# decrypting would break the app (cert pinning) or isn't your business
+# (banking, password manager sync). Add more with `guardctl passthrough`.
+# NOTE: this still needs the proxy to be alive and healthy -- it only
+# skips TLS decryption, not the redirect itself. See critical_direct below
+# for hosts that need to work even when the proxy is completely down.
+passthrough = [
+  "anthropic.com",
+  "claude.ai",
+  "statsig.anthropic.com",
+]
+
+# Hosts exempted from the redirect at the network level, even if the proxy
+# is completely dead -- api.anthropic.com is always included by default
+# (guardctl.assets.DEFAULT_CRITICAL_DIRECT_HOSTS) regardless of this list,
+# specifically so a terminal AI assistant session (or anything else you
+# need working DURING an outage) doesn't go dark along with your browser.
+# Add more here if something else you rely on during an outage still
+# breaks. Resolved to IPs and refreshed by the same timer that refreshes
+# the SSH allowlist -- see `guardctl _refresh`.
+# WARNING: this works by IP address, and big services share IPs --
+# api.anthropic.com and claude.ai are the same address, so listing the API
+# here once let claude.ai skip filtering entirely. Only list hosts whose IPs
+# serve nothing else. For "never touch this host" by NAME, use never_decrypt.
+critical_direct = []
+
+# Hosts the proxy never decrypts, blocks or class-gates, matched by name.
+# api.anthropic.com (Claude Code) is always included.
+never_decrypt = []
+
+# YouTube Restricted Mode: "strict" or "moderate". Change with
+# `guardctl set youtube_restrict moderate` (a loosening -- needs a friend
+# code once locked). Your own terms apply on YouTube either way.
+youtube_restrict = "strict"
+
+[content]
+threshold = 8
+window = 12
+max_scan_chars = 300000
+
+# Class mode: during class, the browser can only OPEN the sites listed
+# here (anything those pages load -- CDNs, sign-in -- still works). Class
+# times come from calcurse (entries titled "Class: ..."), the sites from
+# ~/.config/startpage/bookmarks.js. Neither file is read live: run
+#   sudo guardctl schedule-sync
+# after editing them. Adding class time or removing a site is free;
+# removing time or adding a site needs a friend code once locked.
+# `sudo guardctl schedule` shows what's in effect.
+[class_mode]
+title_prefix = "Class:"
+pad_minutes = 5
+bookmark_folders = ["classes", "dev"]
+bookmark_labels = ["zoom"]
+exclude_labels = ["claude", "gemini"]
+extra_hosts = ["zoom.us"]
+# Sites in these folders are trusted: never content-scanned (passthrough).
+# Ones class mode may need to block (e.g. claude, slack) are still decrypted
+# so it can -- just never scanned or held back. The rest are never
+# decrypted at all.
+passthrough_folders = ["classes", "dev", "coms"]
+# Daily block: every site in these bookmark folders is blocked for all
+# requests, every day, start-end. Videos embedded in class-allowed pages
+# (e.g. a YouTube lecture in Courseworks) still play. Longer hours or more
+# sites is free; shorter hours, fewer sites or new exemptions need a friend
+# code once locked.
+daily_block_folders = ["life"]
+daily_block_start = "09:00"
+daily_block_end = "22:00"
+daily_block_extra_hosts = ["youtu.be", "max.com"]
+daily_block_exempt = ["aws.amazon.com"]
+# Night block: ALL internet through the proxy is cut (pages, apps, Claude
+# Code). LAN and ssh to the ssh_allow hosts still work. Shortening it needs
+# a friend code once locked.
+night_block_start = "01:00"
+night_block_end = "07:00"

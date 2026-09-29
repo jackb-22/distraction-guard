@@ -1,0 +1,64 @@
+# Third-party block lists. Downloaded and normalized by
+# `guardctl _refresh` (guardctl/lists.py) into
+# /var/lib/distraction-guard/lists/<name>.txt -- one plain domain per line,
+# regardless of the source's native format.
+#
+# URLs and formats verified by hand against the live sources on
+# 2026-09-17. If a source changes shape, update_one() refuses to write
+# (min_entries guard) rather than silently replacing a real list with a
+# near-empty one -- check `guardctl status` / the refresh timer's log.
+
+[[list]]
+name = "hagezi-nsfw"
+url = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/nsfw-onlydomains.txt"
+format = "domains"
+category = "nsfw"
+rule = "L-nsfw-hagezi"
+min_entries = 20000
+dns_sinkhole = true
+enabled = true
+
+[[list]]
+name = "oisd-nsfw"
+url = "https://nsfw.oisd.nl/domainswild"
+format = "wildcard"
+category = "nsfw"
+rule = "L-nsfw-oisd"
+min_entries = 100000
+dns_sinkhole = false
+enabled = true
+
+[[list]]
+name = "stevenblack-porn"
+url = "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts"
+format = "hosts"
+category = "nsfw"
+rule = "L-nsfw-stevenblack"
+min_entries = 20000
+dns_sinkhole = false
+enabled = true
+
+[[list]]
+name = "hagezi-bypass"
+url = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/doh-vpn-proxy-bypass-onlydomains.txt"
+format = "domains"
+category = "bypass"
+rule = "L-bypass"
+min_entries = 5000
+dns_sinkhole = true
+enabled = true
+
+# Largest public porn list (~950k domains). Checked 2026-09-21 before
+# adding: ~580k of its domains aren't in the three lists above, and it has
+# no mainstream root domains -- only specific subdomains (individual
+# tumblr/blogspot blogs, a handful of cloudfront distributions). Proxy
+# only: far too big for the dnsmasq degraded-mode sinkhole.
+[[list]]
+name = "blocklistproject-porn"
+url = "https://blocklistproject.github.io/Lists/alt-version/porn-nl.txt"
+format = "domains"
+category = "nsfw"
+rule = "L-nsfw-blp"
+min_entries = 500000
+dns_sinkhole = false
+enabled = true

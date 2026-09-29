@@ -1,0 +1,16 @@
+[Unit]
+Description=Distraction Guard firewall table
+DefaultDependencies=no
+After=local-fs.target nftables.service
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nft -f /var/lib/distraction-guard/compiled/guard.nft
+# No ExecStop: stopping this unit must never remove the table. Only
+# `guardctl emergency-off` (pre-lock) tears it down.
+
+[Install]
+WantedBy=sysinit.target

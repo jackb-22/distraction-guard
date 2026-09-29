@@ -1,0 +1,8 @@
+[Unit]
+Description=Distraction Guard: refresh block lists, resolve SSH allowlist/SafeSearch IPs, recompile, heartbeat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/guardctl _refresh

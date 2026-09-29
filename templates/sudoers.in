@@ -1,0 +1,5 @@
+# Distraction Guard: installed by `guardctl lock`. While locked, these are
+# @USER@'s ONLY sudo rights. guardctl asks for a friend code for anything
+# that loosens the filter; guard-pkg only updates/installs official
+# packages. `guardctl unlock` (friend code) restores full sudo.
+@USER@ ALL=(root) NOPASSWD: /usr/local/bin/guardctl, /usr/local/bin/guard-pkg

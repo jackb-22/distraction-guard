@@ -1,0 +1,13 @@
+# Search engines SafeSearch can't be forced on. Google, Bing and
+# DuckDuckGo are covered (DNS pins to their SafeSearch endpoints plus
+# query rewriting in dg_policy.search); anything else is a way around
+# that, so it's blocked outright.
+rule = "S-altsearch"
+domains = [
+  "search.yahoo.com", "search.aol.com", "ask.com",
+  "yandex.com", "yandex.ru", "ya.ru",
+  "search.brave.com", "startpage.com", "ecosia.org", "qwant.com",
+  "mojeek.com", "swisscows.com", "metager.org", "presearch.com",
+  "you.com", "kagi.com", "gibiru.com", "searx.be", "search.marginalia.nu",
+  "yep.com", "baidu.com", "sogou.com", "seznam.cz", "naver.com",
+]

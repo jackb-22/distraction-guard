@@ -1,0 +1,9 @@
+[Unit]
+Description=Retry queued Distraction Guard friend notifications
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

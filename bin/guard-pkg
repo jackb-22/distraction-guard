@@ -1,0 +1,83 @@
+#!/usr/bin/python3 -I
+"""A deliberately narrow pacman wrapper: update / install <names> / remove
+<names>, nothing else. No -U (arbitrary local package install), no
+--config/--dbpath/--root/--hookdir (which could point pacman at a
+different, unmanaged config or let a scriptlet run with attacker-chosen
+hooks), no -dd (skip dependency checks). Package names are validated
+against a strict pattern before ever reaching a shell. Exists so that once
+guardctl.lock removes jack's general sudo, ordinary package management
+still works without needing the friend for every `pacman -Syu`.
+"""
+import os
+import re
+import sys
+
+PACMAN = "/usr/bin/pacman"
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9@._+-]*$")
+
+PROTECTED = {
+    "nftables", "networkmanager", "dnsmasq", "uv", "python", "sudo",
+    "systemd", "systemd-libs", "p11-kit", "ca-certificates", "ca-certificates-utils",
+    "nss", "openssl", "curl", "qrencode", "linux", "linux-firmware",
+    "glibc", "bash", "mitmproxy", "firefox",
+    # The lock depends on these: polkit (the wifi rule and admin checks),
+    # pam/shadow (su and the root password), util-linux (su itself),
+    # e2fsprogs (chattr on the audit log), podman (jack's containers).
+    "polkit", "pam", "shadow", "util-linux", "e2fsprogs", "podman",
+}
+
+# Never installable while locked: NetworkManager VPN plugins run helper
+# daemons as root from user-supplied connection settings, a history of
+# privilege-escalation bugs. (A VPN itself doesn't bypass the filter.)
+DENY_INSTALL = {
+    "networkmanager-openvpn", "networkmanager-vpnc", "networkmanager-openconnect",
+    "networkmanager-strongswan", "networkmanager-l2tp", "networkmanager-pptp",
+    "networkmanager-fortisslvpn", "networkmanager-sstp",
+}
+
+
+def fail(msg: str) -> int:
+    print(f"guard-pkg: {msg}", file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        return fail("must be run as root (via sudo)")
+
+    argv = sys.argv[1:]
+    if not argv:
+        return fail("usage: guard-pkg update | install <names...> | remove <names...>")
+
+    action, rest = argv[0], argv[1:]
+
+    if action == "update":
+        if rest:
+            return fail("update takes no arguments")
+        os.execv(PACMAN, [PACMAN, "-Syu", "--noconfirm"])
+
+    if action not in ("install", "remove"):
+        return fail(f"unknown action {action!r}")
+    if not rest:
+        return fail(f"{action} needs at least one package name")
+
+    names = []
+    for n in rest:
+        if not NAME_RE.match(n):
+            return fail(f"invalid package name: {n!r}")
+        names.append(n)
+
+    if action == "remove":
+        blocked = PROTECTED & set(names)
+        if blocked:
+            return fail(f"refusing to remove guard dependencies: {', '.join(sorted(blocked))}")
+        os.execv(PACMAN, [PACMAN, "-Rns", "--noconfirm", "--", *names])
+
+    denied = DENY_INSTALL & set(names)
+    if denied:
+        return fail(f"refusing to install (not allowed while locked): {', '.join(sorted(denied))}")
+    os.execv(PACMAN, [PACMAN, "-S", "--needed", "--noconfirm", "--", *names])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

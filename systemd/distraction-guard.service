@@ -1,0 +1,57 @@
+[Unit]
+Description=Distraction Guard filtering proxy (mitmproxy transparent mode)
+After=network-online.target distraction-guard-nft.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=distraction-guard
+Group=distraction-guard
+Environment=HOME=/var/lib/distraction-guard/mitm
+# block_global=false: mitmproxy's default kills clients with a public
+# (global) source address, to stop it being used as an open relay. With
+# IPv6, the laptop's OWN address is global, and nftables' redirect keeps it
+# as the source -- so on any network with real IPv6 (Jack's home wifi),
+# every browser connection was killed and nothing loaded. The listeners are
+# loopback-only and in_guard drops any non-lo traffic to these ports, so
+# no outside client can reach the proxy regardless.
+# Without this, mitmdump's warnings sit in a stdout buffer and only reach
+# the journal when the service stops -- useless for diagnosing live.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/distraction-guard/venv/bin/mitmdump \
+  --mode transparent@127.0.0.1:8080 \
+  --mode transparent@::1:8080 \
+  --mode regular@127.0.0.1:8081 \
+  --set confdir=/var/lib/distraction-guard/mitm \
+  --set connection_strategy=lazy \
+  --set stream_large_bodies=2m \
+  --set http3=false \
+  --set block_global=false \
+  --set ssl_verify_upstream_trusted_ca=/etc/ssl/certs/ca-certificates.crt \
+  --set flow_detail=0 \
+  --set termlog_verbosity=warn \
+  --set guard_policy=/var/lib/distraction-guard/compiled/policy.json \
+  --set guard_log=/var/log/distraction-guard/proxy/decisions.jsonl \
+  -s /usr/local/lib/distraction-guard/addon/guard_addon.py
+Restart=always
+RestartSec=1
+MemoryMax=1500M
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/distraction-guard/mitm /var/log/distraction-guard/proxy
+
+[Install]
+WantedBy=multi-user.target

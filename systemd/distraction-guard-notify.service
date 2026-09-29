@@ -1,0 +1,6 @@
+[Unit]
+Description=Distraction Guard: flush queued friend notifications
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/guardctl _notify-flush

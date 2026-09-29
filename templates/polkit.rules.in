@@ -1,0 +1,11 @@
+// Distraction Guard: installed by `guardctl lock`.
+// Without wheel, joining a new wifi network (a system-wide NetworkManager
+// connection) would need the friend's root password. This allows exactly
+// that. It's safe: filtering is a per-user redirect on output, so no
+// network setting (DNS, VPN, routes) can take @USER@'s traffic around it.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.NetworkManager.settings.modify.system" &&
+        subject.user == "@USER@" && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

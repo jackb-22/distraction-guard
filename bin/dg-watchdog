@@ -1,0 +1,159 @@
+#!/usr/bin/python3 -I
+"""The watchdog daemon: probes the proxy's health endpoint every 10s,
+restarts it on failure (rate-limited), and after policy.degrade_after_seconds
+of sustained failure switches nftables/dnsmasq into degraded mode (direct
+web + DNS sinkhole) so the person isn't just left with no internet the way
+v1's crash loop did. Restores to normal mode after a sustained healthy
+streak. Runs as root via distraction-guard-watchdog.service.
+"""
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+from pathlib import Path
+
+LIB_DIR = "/usr/local/lib/distraction-guard"
+if not os.path.isdir(LIB_DIR):
+    LIB_DIR = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, LIB_DIR)
+
+from guardctl import notify  # noqa: E402
+from guardctl.nftgen import NftConfig, render as render_nft  # noqa: E402
+from guardctl.state import StateDir  # noqa: E402
+from guardctl.watchdog import (  # noqa: E402
+    CHECK_INTERVAL_SECONDS,
+    STARTUP_GRACE_SECONDS,
+    Mode,
+    WatchdogState,
+    check_health,
+    step,
+    wait_for_startup,
+)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s dg-watchdog: %(message)s")
+logger = logging.getLogger("dg-watchdog")
+
+ETC_DIR = Path("/etc/distraction-guard")
+STATE_DIR = "/var/lib/distraction-guard/state"
+RUN_MODE_FILE = Path("/run/distraction-guard/mode")
+COMPILED_NFT = Path("/var/lib/distraction-guard/compiled/guard.nft")
+DNSMASQ_SINKHOLE_ON = Path("/etc/NetworkManager/dnsmasq.d/distraction-guard-sinkhole.conf")
+DNSMASQ_SINKHOLE_OFF = Path("/var/lib/distraction-guard/compiled/dnsmasq-sinkhole.conf")  # staged outside dnsmasq.d, see guardctl.assets
+RESOLVED_CACHE = Path(STATE_DIR) / "resolved.json"
+HEALTH_TOKEN_FILE = Path("/etc/distraction-guard/private/health.token")
+COMPILED_POLICY = Path("/var/lib/distraction-guard/compiled/policy.json")
+
+
+def _current_policy_hash() -> str:
+    """Best-effort: if this can't be read, the health check just skips the
+    hash comparison (still checks token + both listeners) rather than
+    treating "can't read the hash" as unhealthy."""
+    try:
+        return json.loads(COMPILED_POLICY.read_text()).get("hash", "")
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def _read_policy_toml() -> dict:
+    p = ETC_DIR / "policy.toml"
+    if not p.exists():
+        return {}
+    with open(p, "rb") as f:
+        return tomllib.load(f)
+
+
+_EMPTY_RESOLVED = {"ssh_allow_ipv4": [], "ssh_allow_ipv6": [], "critical_direct_ipv4": [], "critical_direct_ipv6": []}
+
+
+def _resolved_cache() -> dict:
+    if not RESOLVED_CACHE.exists():
+        return dict(_EMPTY_RESOLVED)
+    try:
+        return json.loads(RESOLVED_CACHE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return dict(_EMPTY_RESOLVED)
+
+
+def apply_mode(mode: str) -> None:
+    """Re-render and apply nftables for `mode`, and arm/disarm the dnsmasq
+    sinkhole to match. Never raises -- logs and leaves the previous state
+    in place on any failure, same fail-degraded philosophy as everywhere
+    else in this project."""
+    try:
+        policy = _read_policy_toml()
+        cache = _resolved_cache()
+        cfg = NftConfig(
+            mode=mode,
+            ssh_allow_ipv4=cache.get("ssh_allow_ipv4", []),
+            ssh_allow_ipv6=cache.get("ssh_allow_ipv6", []),
+            # Carried through on every mode switch, same as ssh_allow --
+            # otherwise a degrade/restore cycle would silently regenerate
+            # nft without the critical_direct exemption, defeating its
+            # whole point (surviving exactly this kind of proxy trouble).
+            critical_direct_ipv4=cache.get("critical_direct_ipv4", []),
+            critical_direct_ipv6=cache.get("critical_direct_ipv6", []),
+            lan_tcp_ports=policy.get("lan_tcp_ports", []),
+        )
+        text = render_nft(cfg)
+        COMPILED_NFT.parent.mkdir(parents=True, exist_ok=True)
+        COMPILED_NFT.write_text(text)
+        subprocess.run(["nft", "-f", str(COMPILED_NFT)], check=True, timeout=15)
+
+        # Copy in / delete, never rename: the staged file must survive so
+        # the next degrade has something to copy, and _refresh keeps
+        # rewriting it.
+        if mode == Mode.DEGRADED and DNSMASQ_SINKHOLE_OFF.exists():
+            shutil.copyfile(DNSMASQ_SINKHOLE_OFF, DNSMASQ_SINKHOLE_ON)
+        elif mode == Mode.NORMAL:
+            DNSMASQ_SINKHOLE_ON.unlink(missing_ok=True)
+        subprocess.run(["nmcli", "general", "reload", "dns-full"], check=False, timeout=15)
+
+        RUN_MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RUN_MODE_FILE.write_text(mode)
+        logger.info("applied mode=%s", mode)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("failed to apply mode=%s: %s (leaving previous state in place)", mode, e)
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        print("dg-watchdog: must run as root", file=sys.stderr)
+        return 1
+
+    state_store = StateDir(STATE_DIR)
+    policy = _read_policy_toml()
+    degrade_after = int(policy.get("degrade_after_seconds", 300))
+    token = HEALTH_TOKEN_FILE.read_text().strip() if HEALTH_TOKEN_FILE.exists() else ""
+
+    wd_state = WatchdogState(mode=RUN_MODE_FILE.read_text().strip() if RUN_MODE_FILE.exists() else Mode.NORMAL)
+    logger.info("starting, initial mode=%s degrade_after=%ss", wd_state.mode, degrade_after)
+    # Don't judge a proxy that's still starting (it boots alongside us).
+    if not wait_for_startup(lambda: check_health(token=token, expected_hash=_current_policy_hash(), timeout=2)):
+        logger.warning("proxy not healthy after %ss startup grace", STARTUP_GRACE_SECONDS)
+
+    while True:
+        healthy = check_health(token=token, expected_hash=_current_policy_hash())
+        tick = step(wd_state, healthy=healthy, now=time.time(), degrade_after_seconds=degrade_after)
+
+        if tick.restart_proxy:
+            logger.warning("proxy unhealthy, restarting")
+            subprocess.run(["systemctl", "restart", "distraction-guard.service"], check=False, timeout=30)
+
+        if tick.set_mode is not None:
+            apply_mode(tick.set_mode)
+
+        if tick.notify:
+            try:
+                notify.enqueue(state_store, "Distraction Guard", tick.notify, priority="high" if tick.set_mode == Mode.DEGRADED else "default")
+            except Exception:  # noqa: BLE001
+                pass
+
+        time.sleep(CHECK_INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

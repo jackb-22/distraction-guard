@@ -1,0 +1,20 @@
+[Trigger]
+Operation = Upgrade
+Operation = Install
+Type = Package
+Target = nftables
+Target = networkmanager
+Target = dnsmasq
+Target = firefox
+Target = systemd
+Target = python
+Target = ca-certificates
+Target = ca-certificates-utils
+Target = nss
+Target = p11-kit
+Target = sudo
+
+[Action]
+Description = Re-asserting Distraction Guard after package changes
+When = PostTransaction
+Exec = /usr/local/bin/guardctl _post-upgrade

@@ -1,0 +1,49 @@
+#!/usr/bin/python3 -I
+"""guardctl entry point. -I (isolated mode): ignores PYTHONPATH, user site,
+and cwd-based sys.path -- so a compromised or just-messy environment can't
+smuggle in a different dg_policy/guardctl than the one actually installed
+at LIB_DIR. Must run as root for anything mutating (checked below); read-only
+commands (status, log, test-url) are allowed for jack too.
+"""
+import os
+import sys
+from pathlib import Path
+
+LIB_DIR = "/usr/local/lib/distraction-guard"
+# Dev/repo fallback: if LIB_DIR isn't installed yet, use the repo this
+# script lives in (bin/../ = repo root, same layout as the real install).
+if not os.path.isdir(LIB_DIR):
+    LIB_DIR = str(Path(__file__).resolve().parent.parent)
+
+sys.path.insert(0, LIB_DIR)
+
+from guardctl.cli import GuardCtx, run  # noqa: E402
+from guardctl.registry import Kind, kind_of  # noqa: E402
+
+READ_ONLY_COMMANDS = {"status", "log", "test-url"}
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv:
+        print("usage: guardctl <command> [args...]", file=sys.stderr)
+        return 2
+
+    if argv[0] not in READ_ONLY_COMMANDS and os.geteuid() != 0:
+        print("guardctl: this command must be run as root (via sudo)", file=sys.stderr)
+        return 1
+
+    os.umask(0o027)
+    try:
+        ctx = GuardCtx()
+        return run(ctx, argv)
+    except PermissionError as e:
+        print(f"guardctl: permission denied ({e.filename}) -- is Distraction Guard installed? Try: sudo guardctl {argv[0]}", file=sys.stderr)
+        return 1
+    except Exception as e:  # noqa: BLE001 - top-level guard: never show a raw traceback
+        print(f"guardctl: internal error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

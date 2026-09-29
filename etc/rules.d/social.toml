@@ -1,0 +1,26 @@
+# Social platforms and feeds. Whole-domain blocks, including CDN/API hosts
+# so images/video/infinite-scroll requests don't slip through even if the
+# main page load is somehow allowed.
+rule = "S-social"
+domains = [
+  # Reddit
+  "reddit.com", "redd.it", "redditmedia.com", "redditstatic.com", "redditinc.com",
+  # X / Twitter
+  "x.com", "twitter.com", "twimg.com", "t.co", "x.co",
+  # Instagram
+  "instagram.com", "cdninstagram.com",
+  # TikTok
+  "tiktok.com", "tiktokcdn.com", "tiktokv.com", "musical.ly",
+  # Tumblr
+  "tumblr.com",
+  # Bluesky
+  "bsky.app", "bsky.social",
+  # Threads
+  "threads.net",
+  # Facebook / Meta
+  "facebook.com", "fb.com", "fbcdn.net", "messenger.com",
+  # Snapchat
+  "snapchat.com", "sc-cdn.net",
+  # Other feed/meme sites
+  "9gag.com", "ifunny.co", "vk.com",
+]
