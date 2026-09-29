@@ -817,3 +817,14 @@ def test_totp_enroll_wrong_code_keeps_previous_secret(ctx, monkeypatch):
     before = ctx.state.path(auth.TOTP_SECRET_FILE).read_text()
     assert _enroll_with(ctx, monkeypatch, lambda: "000000") == 1
     assert ctx.state.path(auth.TOTP_SECRET_FILE).read_text() == before
+
+
+def test_read_code_default_prompts_without_a_readonly_stream(ctx, monkeypatch):
+    # Regression: read_code passed open("/dev/tty") (read-only) to getpass,
+    # which crashed writing the prompt -- "internal error: not writable".
+    calls = []
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="", stream=None: calls.append((prompt, stream)) or "123456")
+    monkeypatch.setattr(cli.os.path, "exists", lambda p: True)
+    ctx.code_reader = None
+    assert ctx.read_code() == "123456"
+    assert calls == [("Friend code: ", None)]

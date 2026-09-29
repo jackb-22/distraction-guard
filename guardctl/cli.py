@@ -182,11 +182,16 @@ class GuardCtx:
     def read_code(self) -> str:
         if self.code_reader is not None:
             return self.code_reader()
-        try:
-            tty = open("/dev/tty")
-        except OSError:
+        # getpass reads from /dev/tty itself and writes the prompt there.
+        # This used to pass open("/dev/tty") -- opened READ-only -- as the
+        # stream, so writing the prompt raised "not writable" and no code
+        # could ever be entered live (found at the lock ceremony).
+        if not os.path.exists("/dev/tty"):
             raise GuardError("a friend code is required but no terminal is available to enter one")
-        return getpass.getpass("Friend code: ", stream=tty)
+        try:
+            return getpass.getpass("Friend code: ")
+        except (OSError, EOFError) as e:
+            raise GuardError(f"couldn't read the friend code: {e}") from e
 
     def notify(self, title: str, body: str) -> None:
         if self.notifier is not None:
