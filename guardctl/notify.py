@@ -20,6 +20,15 @@ NOTIFY_CONFIG_FILE = "notify.json"
 QUEUE_DIR = "notify-queue"
 DEFAULT_SERVER = "https://ntfy.sh"
 REQUEST_TIMEOUT = 10
+# Found live: every command and heartbeat queued before notify-setup was
+# still waiting when the friend subscribed, and the queue sent oldest-first
+# -- so a new notification (e.g. an unblock) sat behind a backlog while
+# ntfy.sh's anonymous rate limit (~60 burst) rejected the rest. Keep only
+# the newest MAX_QUEUE, and stop at the first failed send instead of
+# hammering the server with the remainder.
+MAX_QUEUE = 20
+STATUS_FILE = "notify-status.json"
+_last_error = ""
 
 
 class NotifyNotConfigured(Exception):
@@ -35,6 +44,11 @@ def setup(state: StateDir, *, server: str = DEFAULT_SERVER) -> str:
     Returns the subscribe URL to show the friend."""
     topic = secrets.token_urlsafe(24)
     state.write_json(NOTIFY_CONFIG_FILE, {"topic": topic, "server": server}, mode=0o600)
+    # Anything queued before this was never deliverable to this subscriber.
+    qdir = state.path(QUEUE_DIR)
+    if qdir.exists():
+        for f in qdir.glob("*.json"):
+            f.unlink(missing_ok=True)
     return f"{server}/{topic}"
 
 
@@ -70,20 +84,50 @@ def flush_queue(state: StateDir) -> tuple[int, int]:
     except NotifyNotConfigured:
         return (0, len(list(qdir.glob("*.json"))))
 
+    files = sorted(qdir.glob("*.json"))
+    dropped = files[:-MAX_QUEUE] if len(files) > MAX_QUEUE else []
+    for f in dropped:
+        f.unlink(missing_ok=True)
+    files = files[len(dropped):]
+    if dropped:
+        note = {"title": "Distraction Guard", "priority": "default",
+                "body": f"{len(dropped)} older notifications were dropped from a backlog."}
+        files.insert(0, None)  # sent first, then the rest in order
     sent = 0
-    remaining = 0
-    for f in sorted(qdir.glob("*.json")):
-        try:
-            payload = json.loads(f.read_text())
-        except (json.JSONDecodeError, OSError):
-            f.unlink(missing_ok=True)  # unreadable queue entry, drop it
-            continue
-        if _send(cfg, payload):
-            f.unlink(missing_ok=True)
-            sent += 1
+    for i, f in enumerate(files):
+        if f is None:
+            payload = note
         else:
-            remaining += 1
-    return (sent, remaining)
+            try:
+                payload = json.loads(f.read_text())
+            except (json.JSONDecodeError, OSError):
+                f.unlink(missing_ok=True)  # unreadable queue entry, drop it
+                continue
+        if not _send(cfg, payload):
+            _record(state, False, _last_error)
+            return (sent, len([x for x in files[i:] if x is not None]))
+        if f is not None:
+            f.unlink(missing_ok=True)
+        sent += 1
+    if sent:
+        _record(state, True, f"sent {sent}")
+    return (sent, 0)
+
+
+def _record(state: StateDir, ok: bool, detail: str) -> None:
+    try:
+        state.write_json(STATUS_FILE, {"at": time.time(), "ok": ok, "detail": detail}, mode=0o600)
+    except OSError:
+        pass
+
+
+def status(state: StateDir) -> dict:
+    qdir = state.path(QUEUE_DIR)
+    return {
+        "configured": is_configured(state),
+        "queued": len(list(qdir.glob("*.json"))) if qdir.exists() else 0,
+        "last": state.read_json(STATUS_FILE, None),
+    }
 
 
 def _send(cfg: dict, payload: dict) -> bool:
@@ -93,11 +137,18 @@ def _send(cfg: dict, payload: dict) -> bool:
         "Title": payload.get("title", "Distraction Guard"),
         "Priority": payload.get("priority", "default"),
     }
+    global _last_error
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-            return 200 <= resp.status < 300
-    except (urllib.error.URLError, TimeoutError, OSError):
+            ok = 200 <= resp.status < 300
+            _last_error = "" if ok else f"HTTP {resp.status}"
+            return ok
+    except urllib.error.HTTPError as e:
+        _last_error = f"HTTP {e.code} {e.reason}" + (" (ntfy rate limit)" if e.code == 429 else "")
+        return False
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        _last_error = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
         return False
 
 

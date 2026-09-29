@@ -828,3 +828,14 @@ def test_read_code_default_prompts_without_a_readonly_stream(ctx, monkeypatch):
     ctx.code_reader = None
     assert ctx.read_code() == "123456"
     assert calls == [("Friend code: ", None)]
+
+
+def test_notify_status_reports_queue_and_test(ctx, monkeypatch, capsys):
+    assert run(ctx, ["notify-status"]) == 0
+    assert "NOT set up" in capsys.readouterr().out
+    notify.setup(ctx.state)
+    notify.enqueue(ctx.state, "t", "b", flush=False)
+    monkeypatch.setattr(notify, "_send", lambda cfg, p: True)
+    assert run(ctx, ["notify-status", "--test"]) == 0
+    out = capsys.readouterr().out
+    assert "queued (not yet delivered): 1" in out and "flushed 1, 0 still queued" in out and "test message: sent" in out

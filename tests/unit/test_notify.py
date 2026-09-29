@@ -64,3 +64,54 @@ def test_message_body_never_needs_terms(tmp_path, monkeypatch):
     monkeypatch.setattr(n, "_send", lambda cfg, payload: sent.append(payload) or True)
     notify.enqueue(s, "Distraction Guard", "Blocked rule S-social")
     assert sent[0]["body"] == "Blocked rule S-social"
+
+
+def test_backlog_capped_newest_kept_and_note_sent_first(tmp_path, monkeypatch):
+    import time
+    s = StateDir(str(tmp_path))
+    notify.setup(s)
+    for i in range(30):
+        notify.enqueue(s, "t", f"msg{i}", flush=False)
+        time.sleep(0.001)
+    bodies = []
+    monkeypatch.setattr(notify, "_send", lambda cfg, p: bodies.append(p["body"]) or True)
+    assert notify.flush_queue(s) == (21, 0)
+    assert "10 older notifications were dropped" in bodies[0]
+    assert bodies[1] == "msg10" and bodies[-1] == "msg29"
+
+
+def test_flush_stops_at_first_failure_and_records_it(tmp_path, monkeypatch):
+    s = StateDir(str(tmp_path))
+    notify.setup(s)
+    for i in range(3):
+        notify.enqueue(s, "t", f"m{i}", flush=False)
+    calls = []
+    def fail(cfg, p):
+        calls.append(p)
+        notify._last_error = "HTTP 429 Too Many Requests (ntfy rate limit)"
+        return False
+    monkeypatch.setattr(notify, "_send", fail)
+    assert notify.flush_queue(s) == (0, 3)
+    assert len(calls) == 1
+    st = notify.status(s)
+    assert st["queued"] == 3 and st["last"]["ok"] is False and "429" in st["last"]["detail"]
+
+
+def test_setup_clears_undeliverable_backlog(tmp_path):
+    s = StateDir(str(tmp_path))
+    notify.enqueue(s, "t", "old", flush=False)
+    notify.setup(s)
+    assert notify.status(s)["queued"] == 0
+
+
+def test_real_send_reports_rate_limit(tmp_path):
+    import http.server, threading
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(429); self.end_headers()
+        def log_message(self, *a): pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.handle_request, daemon=True).start()
+    ok = notify._send({"server": f"http://127.0.0.1:{srv.server_port}", "topic": "t"}, {"title": "x", "body": "y"})
+    assert ok is False and "429" in notify._last_error and "rate limit" in notify._last_error

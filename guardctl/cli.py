@@ -626,6 +626,31 @@ def cmd_notify_setup(ctx: GuardCtx, args: list[str]) -> str:
                else "The test message could NOT be sent -- check the connection and run notify-setup again."))
 
 
+@command("notify-status", Kind.NEUTRAL, min_args=0, max_args=1)
+def cmd_notify_status(ctx: GuardCtx, args: list[str]) -> str:
+    """Is the friend actually getting notifications? Shows the queue and
+    the last send result; `--test` sends a test message right now. (Once
+    locked, jack can't read the system journal, so this is the only view.)"""
+    if args and args != ["--test"]:
+        raise GuardError("usage: guardctl notify-status [--test]")
+    st = notify.status(ctx.state)
+    if not st["configured"]:
+        return "notifications: NOT set up (run: sudo guardctl notify-setup)"
+    out = [f"queued (not yet delivered): {st['queued']}"]
+    last = st["last"]
+    if last:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(last["at"]))
+        out.append(f"last send: {'OK' if last['ok'] else 'FAILED'} at {when} -- {last['detail']}")
+    else:
+        out.append("last send: none recorded yet")
+    if args == ["--test"]:
+        sent, remaining = notify.flush_queue(ctx.state)
+        ok = notify.send_test(ctx.state)
+        out.append(f"flushed {sent}, {remaining} still queued")
+        out.append("test message: " + ("sent -- check your friend's phone" if ok else f"FAILED -- {notify._last_error}"))
+    return "\n".join(out)
+
+
 # --- emergency kill switch ---------------------------------------------
 # The one thing that must work even if everything else about this system
 # is broken: a single command that unconditionally stops redirecting
