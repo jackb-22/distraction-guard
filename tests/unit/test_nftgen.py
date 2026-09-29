@@ -231,3 +231,27 @@ def test_non_web_traffic_is_still_rejected():
         [("203.0.113.5", 25), ("2001:db8::5", 25)],
     )
     assert all(v.startswith("failed") for v in out.values()), out
+
+
+# --- Google Meet media ----------------------------------------------------------
+# Found live: Meet calls connected with no audio/video, because the media
+# (UDP 3478/19302-19309, TCP 19305 or TLS-on-443) was hitting the catch-all
+# reject. Inside the namespace nothing answers, so an ALLOWED connection
+# times out while a REJECTED one fails immediately.
+
+@pytest.mark.skipif(not HAVE_UNSHARE_NFT, reason="needs unshare+nft")
+def test_meet_media_allowed_only_to_meet_ranges():
+    out = _netns_connect(
+        render(NftConfig(mode="normal", guard_uid=1)),
+        [("74.125.250.9", 19305), ("74.125.250.9", 443), ("203.0.113.5", 19305)],
+    )
+    assert "timed out" in out["74.125.250.9:19305"], out
+    assert "timed out" in out["74.125.250.9:443"], out  # not redirected to the proxy
+    assert out["203.0.113.5:19305"].startswith("failed") and "timed out" not in out["203.0.113.5:19305"], out
+
+
+def test_meet_media_udp_ports_render():
+    text = render(NftConfig())
+    jack_out = text.split("chain jack_out {")[1].split("chain web_filter {")[0]
+    assert "ip daddr @meet_media4 udp dport { 3478, 19302-19309 } accept" in jack_out
+    assert jack_out.index("meet_media4 udp") < jack_out.index("reject with icmpx")

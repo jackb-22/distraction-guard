@@ -28,6 +28,23 @@ table inet distraction_guard {
     flags interval
 @@CRITICAL_DIRECT6_ELEMENTS@@
   }
+  # Google Meet media relays (Google's published Meet IP ranges). Meet's
+  # page/chat go through the proxy like any site, but audio/video travel
+  # over UDP 3478 / 19302-19309 (TCP 19305 or TLS-on-443 as fallbacks),
+  # which the catch-all reject below used to block -- found live: calls
+  # connected with no audio or video. Scoped to these ranges only: opening
+  # the ports to any address would let a tunnel through them bypass the
+  # filter. These relays carry only call media, never web pages.
+  set meet_media4 {
+    type ipv4_addr
+    flags interval
+    elements = { 74.125.247.128/32, 74.125.250.0/24, 142.250.82.0/24 }
+  }
+  set meet_media6 {
+    type ipv6_addr
+    flags interval
+    elements = { 2001:4860:4864:4::/64, 2001:4860:4864:5::/64, 2001:4860:4864:6::/64 }
+  }
   set ssh_allow4 {
     type ipv4_addr
     flags interval
@@ -62,6 +79,8 @@ table inet distraction_guard {
     ip6 daddr ::1 return
     ip daddr @critical_direct4 return
     ip6 daddr @critical_direct6 return
+    ip daddr @meet_media4 return   # TURN-over-TLS fallback isn't HTTP; don't redirect it
+    ip6 daddr @meet_media6 return
     tcp dport { 80, 443 } jump web_nat
   }
   chain web_nat {
@@ -102,6 +121,10 @@ table inet distraction_guard {
     # whose resolver isn't in RFC1918 space.
     udp dport 53 accept
     tcp dport 53 accept
+    ip daddr @meet_media4 udp dport { 3478, 19302-19309 } accept
+    ip6 daddr @meet_media6 udp dport { 3478, 19302-19309 } accept
+    ip daddr @meet_media4 tcp dport { 443, 19305 } accept
+    ip6 daddr @meet_media6 tcp dport { 443, 19305 } accept
     tcp dport { 80, 443 } jump web_filter
     udp dport 443 reject
     tcp dport 22 ip daddr @ssh_allow4 accept
