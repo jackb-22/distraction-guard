@@ -37,6 +37,11 @@ def main() -> int:
     try:
         ctx = GuardCtx()
         return run(ctx, argv)
+    except KeyboardInterrupt:
+        # Ctrl+C (e.g. at the friend-code prompt): nothing was changed yet --
+        # _authorize runs before any command does anything.
+        print("\nguardctl: cancelled, nothing was changed", file=sys.stderr)
+        return 130
     except PermissionError as e:
         print(f"guardctl: permission denied ({e.filename}) -- is Distraction Guard installed? Try: sudo guardctl {argv[0]}", file=sys.stderr)
         return 1
