@@ -20,6 +20,7 @@ from guardctl.registry import Kind, all_commands, command, get, kind_of
 from guardctl.state import StateDir
 
 MAX_TEMP_ALLOW_MINUTES = 240
+HEARTBEAT_INTERVAL = 20 * 3600  # ~daily, tolerant of timer drift
 
 
 def _write_json_for_proxy(p: Path, data) -> None:
@@ -234,7 +235,12 @@ def run(ctx: GuardCtx, argv: list[str]) -> int:
         result = cmd.handler(ctx, args)
         auth_method = "root" if auth.caller_is_real_root(ctx.sudo_user) else ("totp" if (cmd.kind == Kind.LOOSEN and ctx.state.is_locked()) else "none")
         ctx.audit(cmd_line=" ".join([name, *args]), classification=cmd.kind, auth_method=auth_method, summary=summary)
-        if cmd.kind != Kind.NEUTRAL:
+        # Tell the friend about loosening (and lock/unlock) only. This used to
+        # fire for every non-neutral command -- including the INTERNAL timer
+        # job that flushes the notification queue, which then notified the
+        # friend about itself every 5 minutes. Timer jobs send their own
+        # meaningful messages (heartbeat, degrade/restore) where needed.
+        if cmd.kind == Kind.LOOSEN or name == "lock":
             ctx.notify(f"[guard] {name}", summary)
         if result is not None:
             print(result)
@@ -909,7 +915,12 @@ def cmd_refresh(ctx: GuardCtx, args: list[str]) -> str:
     heartbeat = f"[guard] {status} - locked={ctx.state.is_locked()} - policy {raw['hash'][:8]} - lists failed: {len(failed)}"
     if asset_error:
         heartbeat += f" - ASSET WRITE FAILED: {asset_error}"
-    ctx.notify("Distraction Guard heartbeat", heartbeat)
+    # The refresh timer runs every 6h (and after each boot); the friend
+    # should get ONE heartbeat a day, not four-plus. Problems always go out.
+    last = ctx.state.read_json("heartbeat.json", {}).get("at", 0)
+    if status != "ok" or time.time() - last >= HEARTBEAT_INTERVAL:
+        ctx.notify("Distraction Guard heartbeat", heartbeat)
+        ctx.state.write_json("heartbeat.json", {"at": time.time()}, mode=0o600)
     return heartbeat
 
 

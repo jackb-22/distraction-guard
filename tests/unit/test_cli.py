@@ -839,3 +839,31 @@ def test_notify_status_reports_queue_and_test(ctx, monkeypatch, capsys):
     assert run(ctx, ["notify-status", "--test"]) == 0
     out = capsys.readouterr().out
     assert "queued (not yet delivered): 1" in out and "flushed 1, 0 still queued" in out and "test message: sent" in out
+
+
+def test_friend_notified_only_for_loosen_and_lock(ctx):
+    sent = []
+    ctx.notifier = lambda title, body: sent.append(title)
+    ctx.sudo_user = None  # internal commands run as real root (systemd)
+    run(ctx, ["_notify-flush"])
+    run(ctx, ["compile"])
+    ctx.sudo_user = "jack"
+    run(ctx, ["block", "example.com"])
+    assert sent == []  # timer jobs, neutral and tighten: silent
+    run(ctx, ["unblock", "example.com"])
+    assert sent == ["[guard] unblock"]
+
+
+def test_heartbeat_at_most_daily_but_problems_always(ctx, monkeypatch):
+    sent = []
+    ctx.notifier = lambda title, body: sent.append((title, body))
+    ctx.sudo_user = None
+    monkeypatch.setattr(ctx, "write_assets", lambda raw: None)
+    run(ctx, ["_refresh"]); run(ctx, ["_refresh"])
+    assert [t for t, _ in sent].count("Distraction Guard heartbeat") == 1
+    def boom(raw):
+        raise OSError("disk full")
+    monkeypatch.setattr(ctx, "write_assets", boom)
+    run(ctx, ["_refresh"])
+    beats = [b for t, b in sent if t == "Distraction Guard heartbeat"]
+    assert len(beats) == 2 and "PROBLEMS" in beats[-1]
